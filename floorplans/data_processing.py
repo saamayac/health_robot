@@ -47,15 +47,15 @@ def csv_to_geojson(data):
     data['type']=data['region_shape_attributes'].apply(lambda x: x['name'])
     for shape,df_shape in data.groupby('type', group_keys=False)['region_shape_attributes']:
         data.loc[df_shape.index,'pixls_coor']=df_shape.apply(process_type,args=[shape])
-
+ 
     # get shape size (pixels)
     maxpxl_x,maxpxl_y=pd.DataFrame(data['pixls_coor'].apply(max).values.tolist()).max()
     minpxl_x,minpxl_y=pd.DataFrame(data['pixls_coor'].apply(min).values.tolist()).min()
 
     # transform original map into hospital polygon coordinates (lat,lon)
-    x_D,y_D=-74.03056135394623,4.8563414479645814
-    x_B,y_B=-74.03052796587849,4.855884944267842
-    x_A,y_A=-74.03033456778033,4.856022342488572
+    x_D,y_D=-74.03055921411173, 4.856337739018741
+    x_A,y_A=-74.030438783079, 4.8561698356827065
+    x_B,y_B=-74.030296455495, 4.856265644936514
     polygon=[x_A, y_A, x_B, y_B, x_D, y_D]
     shape=[minpxl_x,minpxl_y,maxpxl_x,maxpxl_y]
     mesh=lambda X: generate_non_axis_aligned_rectangular_mesh(polygon,X,shape)
@@ -105,12 +105,12 @@ def img_to_geojson(img,polygon,shape):
 
 if __name__ == "__main__":
     # load shape annotations (create/edit on https://www.robots.ox.ac.uk/~vgg/software/via/via_demo.html)
-    data=pd.read_csv('floorplans/unisabana_hospital_rooms_csv.csv')
+    data=pd.read_csv('floorplans/polygons/unisabana_hospital_rooms_csv.csv')
     # save with geojson format
     geojson_file,geo_polygon,geo_shape=csv_to_geojson(data)
 
     # load floor limits
-    img = Image.open('floorplans/floorII_walls.png').convert("L")
+    img = Image.open('floorplans/pngs/floorII_walls.png').convert("L")
     # save with geojson format
     geojson_file=img_to_geojson(img,geo_polygon,geo_shape)
     
