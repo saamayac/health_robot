@@ -56,6 +56,10 @@ def csv_to_geojson(data):
     x_D,y_D=-74.03055921411173, 4.856337739018741
     x_A,y_A=-74.030438783079, 4.8561698356827065
     x_B,y_B=-74.030296455495, 4.856265644936514
+
+    x_D,y_D=-74.03162923599919,4.856616659082746
+    x_A,y_A=-74.03095198800361, 4.8555003729806145
+    x_B,y_B=-74.02999308079411,4.856102663169025
     polygon=[x_A, y_A, x_B, y_B, x_D, y_D]
     shape=[minpxl_x,minpxl_y,maxpxl_x,maxpxl_y]
     mesh=lambda X: generate_non_axis_aligned_rectangular_mesh(polygon,X,shape)

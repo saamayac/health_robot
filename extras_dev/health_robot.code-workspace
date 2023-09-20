@@ -1,0 +1,10 @@
+{
+    "folders": [
+		{
+			"path": ".."
+		},
+		{
+			"path": "../../mesa-examples/gis/geo_sir"
+		}
+	]
+}

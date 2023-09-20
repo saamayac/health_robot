@@ -2,20 +2,22 @@ import mesa
 import mesa_geo as mg
 import json
 
-#%pip install mesa
-#%pip install mesa_geo
-
 ############## define agent classes
 class Hospital(mg.GeoAgent):
     def __init__(self, unique_id, model, geometry, crs):
         super().__init__(unique_id, model, geometry, crs)
         self.color_hotspot()
 
+    def step(self):
+        """Advance agent one step."""
+        self.color_hotspot()
+        self.model.counts[self.atype] += 1  # Count agent type
+        
     def color_hotspot(self):
-      # Decide if there are agents here
-      residents = self.model.space.get_intersecting_agents(self)
-      patients_here = [resident for resident in residents if resident.atype == "patient"]
-
+      # Decide if there are patients here
+      people = self.model.space.get_intersecting_agents(self)
+      patients_here = [patient for patient in people if patient.atype == "patient"]
+ 
       if len(patients_here) >= 1:
           self.atype = "ocupied"
       else:
@@ -24,14 +26,13 @@ class Hospital(mg.GeoAgent):
     def __repr__(self):
         return "Hospital space " + str(self.unique_id)
 
+
 from shapely.geometry import Point
 class PersonAgent(mg.GeoAgent):
     """Person Agent."""
     def __init__( self, unique_id, model, geometry, crs,
         agent_type="patient",
         mobility_range=4, # movement per step
-        recovery_rate=0.2,
-        death_risk=0.1,
         p_worker=0.9,
     ):
         super().__init__(unique_id, model, geometry, crs)
@@ -55,7 +56,7 @@ class PersonAgent(mg.GeoAgent):
 
     def step(self):
         """Advance one step."""
-        if self.random.random() < self.death_risk: self.atype = "dead"
+        if self.random.random() < 0.01: self.atype = "dead"
 
         # If not dead, move
         if self.atype != "dead":
@@ -72,7 +73,7 @@ class PersonAgent(mg.GeoAgent):
 
 class GeoModel(mesa.Model):
     # Opening geoJSON files
-    with open('floorplans/map.geojson') as file:
+    with open('floorplans/unisabana_hospital_rooms.geojson') as file:
         hospital_rooms = json.load(file)
 
     def __init__(self, pop_size=3, p_worker=0.2):
@@ -96,7 +97,7 @@ class GeoModel(mesa.Model):
             }
         )
 
-        # Set up the Neighbourhood patches for every region in file
+        # Set up the room patches for every polygon in file
         # (add to schedule later)
         ac = mg.AgentCreator(agent_class=Hospital, model=self)
         neighbourhood_agents = ac.from_GeoJSON(self.hospital_rooms)
@@ -158,56 +159,3 @@ class GeoModel(mesa.Model):
 def get_patient_count(model): return model.counts["patient"]
 def get_med_count(model): return model.counts["medical provider"]
 def get_dead_count(model): return model.counts["dead"]
-
-############## define server
-
-class Text(mesa.visualization.TextElement):
-    """
-    Display a text
-    """
-    def __init__(self):
-        pass
-
-    def render(self, model):
-        return "Steps: " + str(model.steps)
-
-
-model_params = {
-    "pop_size": mesa.visualization.Slider("Population size", 30, 10, 100, 10),
-}
-
-def agent_draw(agent):
-    """
-    Portrayal Method for canvas
-    """
-    portrayal = {}
-    if isinstance(agent, PersonAgent): portrayal["radius"] = "2"
-
-    if agent.atype in ["ocupied"]: portrayal["color"] = "Red"
-    elif agent.atype in ["empty"]: portrayal["color"] = "Green"
-
-    elif agent.atype in ["patient"]: portrayal["color"] = "Grey"
-    elif agent.atype in ["medical provider"]: portrayal["color"] = "Black"
-    elif agent.atype in ["dead"]: portrayal["color"] = "Yellow"
-    return portrayal
-
-
-map_element = mg.visualization.MapModule(agent_draw)
-agents_chart = mesa.visualization.ChartModule(
-    [
-        {"Label": "medical provider", "Color": "Black"},
-        {"Label": "patient", "Color": "Grey"},
-        {"Label": "dead", "Color": "Yellow"},
-    ]
-)
-
-server = mesa.visualization.ModularServer(
-    GeoModel,
-    [map_element, Text(), agents_chart],
-    "agent-based model",
-    model_params,
-)
-
-
-########## web application
-server.launch()
