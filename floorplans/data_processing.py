@@ -38,7 +38,7 @@ def process_type(attributes,shape):
         return [[int(x),int(y)] for x,y in zip(x,y)]
     
 
-def csv_to_geojson(data):
+def csv_to_geojson(data, name):
     # load dictionary columns of information
     dict_cols=['region_shape_attributes','region_attributes']
     data[dict_cols]=data[dict_cols].applymap(lambda x: json.loads(x))
@@ -77,7 +77,7 @@ def csv_to_geojson(data):
 
     # download file (visualize on https://geojson.io/#new&map=2/0/20)
     geojson={"type": "FeatureCollection", "features": features}
-    with open('floorplans/unisabana_hospital_rooms.geojson', 'w') as convert_file:
+    with open('floorplans/unisabana_hospital_%s.geojson'%name, 'w') as convert_file:
         geojson_file=json.dumps(geojson)
         convert_file.write(geojson_file)
     return geojson_file, polygon, shape
@@ -111,7 +111,17 @@ if __name__ == "__main__":
     # load shape annotations (create/edit on https://www.robots.ox.ac.uk/~vgg/software/via/via_demo.html)
     data=pd.read_csv('floorplans/polygons/unisabana_hospital_rooms_csv.csv')
     # save with geojson format
-    geojson_file,geo_polygon,geo_shape=csv_to_geojson(data)
+    geojson_file,geo_polygon,geo_shape=csv_to_geojson(data, 'rooms')
+    
+    # load shape annotations (create/edit on https://www.robots.ox.ac.uk/~vgg/software/via/via_demo.html)
+    data=pd.read_csv('floorplans/polygons/unisabana_hospital_beds_csv.csv')
+    # save with geojson format
+    geojson_file,geo_polygon,geo_shape=csv_to_geojson(data, 'beds')
+
+    # load shape annotations (create/edit on https://www.robots.ox.ac.uk/~vgg/software/via/via_demo.html)
+    data=pd.read_csv('floorplans/polygons/unisabana_hospital_carts_csv.csv')
+    # save with geojson format
+    geojson_file,geo_polygon,geo_shape=csv_to_geojson(data, 'carts')
 
     # load floor limits
     img = Image.open('floorplans/pngs/floorII_walls.png').convert("L")

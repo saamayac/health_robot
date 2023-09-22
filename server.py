@@ -24,14 +24,15 @@ def agent_draw(agent):
     Portrayal Method for canvas
     """
     portrayal = {}
-    if isinstance(agent, PersonAgent): portrayal["radius"] = "2"
+    if isinstance(agent, PersonAgent): portrayal["radius"] = "1"
 
-    if agent.atype in ["ocupied"]: portrayal["color"] = "Red"
-    elif agent.atype in ["empty"]: portrayal["color"] = "Green"
+    if agent.state in ["ocupied"]: portrayal["color"] = "Red"
+    elif agent.state in ["empty"]: portrayal["color"] = "Green"
 
-    elif agent.atype in ["patient"]: portrayal["color"] = "Grey"
+    elif agent.state in ["dead"]: portrayal["color"] = "Yellow"
+    elif agent.atype in ["patient"]: portrayal["color"] = "Blue"
     elif agent.atype in ["medical provider"]: portrayal["color"] = "Black"
-    elif agent.atype in ["dead"]: portrayal["color"] = "Yellow"
+    
     return portrayal
 
 map_element = mg.visualization.MapModule(agent_draw,view={'lng': -74.030387, 'lat': 4.856246},
