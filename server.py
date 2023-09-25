@@ -15,9 +15,7 @@ class Text(mesa.visualization.TextElement):
         return "Steps: " + str(model.steps)
 
 
-model_params = {
-    "pop_size": mesa.visualization.Slider("Population size", 30, 10, 100, 10),
-}
+# model_params = {"pop_size": mesa.visualization.Slider("Population size", 30, 10, 100, 10)}
 
 def agent_draw(agent):
     """
@@ -29,7 +27,7 @@ def agent_draw(agent):
     if agent.state in ["ocupied"]: portrayal["color"] = "Red"
     elif agent.state in ["empty"]: portrayal["color"] = "Green"
 
-    elif agent.state in ["dead"]: portrayal["color"] = "Yellow"
+    elif agent.state in ["inactive"]: portrayal["color"] = "Yellow"
     elif agent.atype in ["patient"]: portrayal["color"] = "Blue"
     elif agent.atype in ["medical provider"]: portrayal["color"] = "Black"
     
@@ -42,13 +40,13 @@ agents_chart = mesa.visualization.ChartModule(
     [
         {"Label": "medical provider", "Color": "Black"},
         {"Label": "patient", "Color": "Grey"},
-        {"Label": "dead", "Color": "Yellow"},
+        {"Label": "inactive", "Color": "Yellow"},
     ]
 )   
   
 server = mesa.visualization.ModularServer(
     GeoModel,
-    [map_element, Text(), agents_chart],
+    [map_element, Text(), agents_chart], 
     "agent-based model",
-    model_params,
+    #model_params,
 )

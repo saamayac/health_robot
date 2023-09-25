@@ -69,8 +69,9 @@ def csv_to_geojson(data, name):
     # save with geojson format
     features=[]
     for i,feature in data.iterrows():
+        att_name= lambda k: 'number' if k=='Id' else 'atype' if k=='name' else k
         info={"type": "Feature",
-                "properties":feature['region_attributes'],
+                "properties": {att_name(k):x.strip() for k,x in feature['region_attributes'].items()},
                 "geometry":{"coordinates":[feature['coordinates']], "type": "Polygon"},
                 "id":i}
         features.append(info)
@@ -95,7 +96,7 @@ def img_to_geojson(img,polygon,shape):
     for i,geometry in enumerate(mypoly[1:-1]):
         mypoly[i]['coordinates']=[mesh(geometry['coordinates'][0])]
         info={"type": "Feature",
-                "properties":{"name":"floor","Id":"2"},
+                "properties":{"atype":"floor","number":"2"},
                 "geometry":mypoly[i],
                 "id":i}
         features.append(info)
