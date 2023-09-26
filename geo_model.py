@@ -105,7 +105,7 @@ class GeoModel(mesa.Model):
  
         # Generate SpaceAgent population (add to schedule later)
         self.space_agents=[]
-        space_file_name=['rooms', 'beds', 'carts','floor']
+        space_file_name=['floor','polygons']
         last_id=0
         for file in space_file_name:
             file='floorplans/unisabana_hospital_'+file+'.geojson'
@@ -137,11 +137,12 @@ class GeoModel(mesa.Model):
         return self.steps + self.random.expovariate(1/rate)
 
     def add_population(self, person_setup, space_agents_filter):
+        """Add population to model."""
         person_type, person_amount = person_setup
-        
         ac_population = mg.AgentCreator( PersonAgent, model=self, crs=self.space.crs, 
                                         agent_kwargs={'agent_type': person_type})
         
+
         space_agents_ids=self.filter_agents(self.space_agents, space_agents_filter)
         try:
             sample_spaces_ids = self.random.sample(space_agents_ids, person_amount)
@@ -149,7 +150,7 @@ class GeoModel(mesa.Model):
             print("Not enough space to add %i %ss"%(person_amount,person_type))
             sample_spaces_ids = space_agents_ids
 
-        for ix, person_id in zip(range(self.last_person_id,
+        for person_id, ix in zip(range(self.last_person_id,
                                self.last_person_id+person_amount), sample_spaces_ids):
             # posible starting points
             center_x, center_y = self.space_agents[ix].geometry.centroid.coords.xy

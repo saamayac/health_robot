@@ -24,15 +24,16 @@ def agent_draw(agent):
     portrayal = {}
     if isinstance(agent, PersonAgent): portrayal["radius"] = "1"
 
-    if agent.state in ["ocupied"]: portrayal["color"] = "Red"
-    elif agent.state in ["empty"]: portrayal["color"] = "Green"
+    if agent.state=="ocupied" and agent.atype=='bed': portrayal["color"] = "Red"
+    elif agent.state=="empty" and agent.atype=='bed': portrayal["color"] = "Green"
 
     elif agent.state in ["inactive"]: portrayal["color"] = "Yellow"
     elif agent.atype in ["patient"]: portrayal["color"] = "Blue"
     elif agent.atype in ["medical provider"]: portrayal["color"] = "Black"
+    else : portrayal["color"] = "Grey"
     
-    return portrayal
-
+    return portrayal  
+ 
 map_element = mg.visualization.MapModule(agent_draw,view={'lng': -74.030387, 'lat': 4.856246},
                                          zoom=30,scale_options={'metric':True,'setMaxZoom':300}) 
 
