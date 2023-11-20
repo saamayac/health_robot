@@ -11,8 +11,8 @@ class Text(mesa.visualization.TextElement):
     def render(self, model): return "Steps: " + str(model.schedule.steps)
 
 model_params = {"ocupation": mesa.visualization.Slider("Bed's ocupation %", 10, 0, 100, 10),
-                "n_nurses": mesa.visualization.Slider("Nurses", 5, 1, 10, 2),
-                "n_doctors": mesa.visualization.Slider("Doctors", 2, 1, 10, 2),
+                "n_nurses": mesa.visualization.Slider("Nurses", 5, 1, 10, 1),
+                "n_doctors": mesa.visualization.Slider("Doctors", 2, 1, 10, 1),
                 }
 
 def agent_draw (agent):
@@ -28,10 +28,10 @@ def agent_draw (agent):
         portrayal["color"] = color
 
     elif agent.atype=='bed':
-        if agent.state=="ocupied": 
+        if agent.patient_ocupation>0: 
             portrayal["color"] = "Red"
             portrayal["fillOpacity"] = 0.1
-        elif agent.state=="empty": 
+        else: 
             portrayal["color"] = "Green"
             portrayal["fillOpacity"] = 0.1
 
@@ -67,9 +67,14 @@ pie_chart_documenting = mesa.visualization.PieChartModule(
         {"Label": "not-documenting_%", "Color": "Grey"}
     ])
 
+pie_chart_medicating = mesa.visualization.PieChartModule(
+    [   {"Label": "medicating_%", "Color": "Black"},
+        {"Label": "not-medicating_%", "Color": "Grey"}
+    ])
+
 server = mesa.visualization.ModularServer(
     GeoModel,
-    [map_element, Text(), agents_chart, pie_chart_walking, pie_chart_documenting],  
+    [map_element, Text(), agents_chart, pie_chart_walking, pie_chart_documenting, pie_chart_medicating],  
     "Hospital de la Sabana - ABMS",
     model_params,       
 )      

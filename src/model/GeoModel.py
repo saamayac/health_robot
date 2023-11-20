@@ -4,17 +4,12 @@ import mesa_geo as mg
 from agents.PersonAgent import PersonAgent
 from agents.SpaceAgent import SpaceAgent
 from agents.HospitalAgent import Hospital
-
-from model.HospitalSchedule import HospitalScheduler
-from model.d_star_lite import DStarLite
+from model.Schedulers import HospitalScheduler
 
 from os.path import join
-from shapely.geometry import Point
 import geopandas as gpd 
 import pandas as pd
 import random
-import pickle
-from functools import partial
 
 class GeoModel(mesa.Model): 
 
@@ -22,30 +17,38 @@ class GeoModel(mesa.Model):
         self.running = True
         self.schedule = HospitalScheduler(self)
         self.current_id=0
-        self.walking_speed=15 # steps per time tick
-
-        # counts for performance metrics
-        self.worker_states=['admiting','documenting','checking-medicine','documenting-risk']
-        self.patient_states=['waiting_admission','in-admission'] # risk-evaluation (def freq. visit by gravity), aplicacion-med, egreso
-        self.collected_fields = ["doctor","nurse","patient",
-                                 "walking", "waiting_instruction","ocupied","empty",
-                                ]+self.worker_states+self.patient_states
-        self.reset_counts() 
-        self.metric_fields=['walking','documenting']
-        self.reset_metrics()
 
         # Scheduled actions time
-        self.resample_task_times()
-        self.action_state = {'do-admit': 'admiting',
+        self.resample_variables()
+        self.action_state = {'remove': 'leaving',
+                             
+                             # shift actions
+                             'do-informative-meeting': 'in-meeting',
+                             'do-inventory': 'taking-inventory',
                              'do-document': 'documenting',
-                             'do-medicine-check': 'checking-medicine',
-                             'do-document-risk': 'documenting', #'documenting-risk', 
-                             'in-admission': 'in-admission',
+
+                             # patient-related actions
+                             'do-admit': 'admitting',
+                             'do-evaluate': 'evaluating', 
+                             'do-medicate': 'medicating',
+
+                             # patient actions
+                             'request-admission': 'waiting-admission', # starts 'in-admission' and ends in 'admitted'
+                             'request-evaluation': 'waiting-evaluation', # starts 'in-evaluation' and ends in 'evaluated'
+                             'request-medication': 'waiting-medication', # starts 'in-medication' and ends in 'medicated'
                              }
+
+        # counts for performance metrics
+        self.collected_fields = ["doctor", "nurse", "patient", "idle", "walking","removed",
+                                 'in-admission','admitted',
+                                 'in-evaluation','evaluated',
+                                 'in-medication','medicated'] + list(self.action_state.values())
+        self.reset_counts()
+        self.metric_fields = ['walking','documenting','admitting','evaluating','medicating','taking-inventory','in-meeting']
+        self.reset_metrics()
 
         # create hospital space
         self.space = Hospital()
-        # check: self.space.crs.name for distance object
         self.doctors=[]; self.nurses=[]
 
         # SpaceAgents: read from files and add to model
@@ -53,35 +56,35 @@ class GeoModel(mesa.Model):
         file_names=['floor','polygons']
         df_space = pd.concat((gpd.read_file(file_path%file) for file in file_names),ignore_index=True)
         space_agents = mg.AgentCreator(agent_class=SpaceAgent, model=self).from_GeoDataFrame(df_space)  
-        self.space.add_spaces(space_agents)
+        self.space.add_SpaceAgents(space_agents)
  
         # PersonAgent Constructors 
-        n_patients=int(ocupation*self.space.available_beds/100)
-        self.init_poputation(n_doctors, n_nurses, n_patients) 
+        n_patients=int(ocupation*self.space.floor.patient_availability/100)
+        self.init_poputation(n_doctors, n_nurses, n_patients)
 
-        # Add the SpaceAgents to schedule AFTER person agents, to allow them to update their ocuopation by using BaseScheduler   
-        for agent in self.space.filter_agents(lambda a: isinstance(a, SpaceAgent)):  self.schedule.add(agent)
-
-        # prepare path creation object and load previous paths
-        self.dstarlite = DStarLite(self.space.floor, zoom_factor=0.09)
-        try: 
-            with open("data/paths/cache_paths.pkl", "rb") as cache_file:
-                self.cache_paths = pickle.load(cache_file)
-        except:
-            self.cache_paths = {}
+        # Add the SpaceAgents to schedule AFTER person agents, to allow them to update their ocupation by using BaseScheduler   
+        for agent in space_agents: self.schedule.add(agent)
 
         # collect initialization data
         self.initialize_data_collector()
-        print('agents initialized')
 
-    def resample_task_times(self):
-        self.consult_time = random.triangular(10, 20)
-        self.review_time = random.triangular(5, 10)
+    def resample_variables(self):
+        # lifetime related
         self.patient_stay_length = random.triangular(2*60, 3*60)
-        self.shift_length = 12*60
-        self.check_medicine_cart_time = random.triangular(15, 20) 
-        self.admission_time = random.triangular(5, 10)
         self.time_between_patients=random.triangular(5, 10)
+        self.shift_length = 12*60
+
+        # shift related
+        self.walking_speed=15 # steps per time tick
+        self.shift_transfer_meeting_time = random.triangular(15, 20)
+        self.inventory_time = random.triangular(15, 20)
+
+        # patient related
+        self.medicine_round_frequency = random.triangular(60, 120)
+        self.admission_time = random.triangular(5, 10)
+        self.evaluation_time = random.triangular(5, 10)
+        self.evaluation_frequency = random.triangular(60, 120)
+        
 
     def init_poputation(self, n_doctors, n_nurses, n_patients):
         """Add population to model."""
@@ -92,62 +95,54 @@ class GeoModel(mesa.Model):
         # add agents
         self.add_PersonAgents(self.ac_doctors, n_doctors, self.space.nurse_station)
         self.add_PersonAgents(self.ac_nurses, n_nurses, self.space.nurse_station)
-        self.add_PersonAgents(self.ac_patients, n_patients, self.space.get_empty_beds(n_patients))
+        for _ in range(n_patients): # add patients at different times
+            self.schedule.patient_arrivals.append(self.schedule.steps + int(self.time_between_patients))
+            self.resample_variables()
 
     def add_PersonAgents(self, agentCreator, amount, this_spaces, do_shift_takeover=False): 
         """Add population to model."""
         if isinstance(this_spaces,SpaceAgent): this_spaces=[this_spaces]*amount 
-
         for this_space in this_spaces:
             # create person on this_space centroid
             this_person = agentCreator.create_agent(this_space.geometry.centroid, "P%i"%super().next_id())
             self.schedule.add(this_person)
             self.space.add_agents(this_person)
-
-            # add to lists of agents according to type
-            if agentCreator.agent_kwargs['agent_type']=='doctor':
-                this_person.patients=[]
-                self.doctors.append(this_person)
-                if do_shift_takeover: return this_person
-            elif agentCreator.agent_kwargs['agent_type']=='nurse':
-                this_person.patients=[] 
-                self.nurses.append(this_person)
-                if do_shift_takeover: return this_person
-            elif agentCreator.agent_kwargs['agent_type']!='patient': raise NameError('AgentTypeNotDefined')
+            # return person if shift takeover is needed
+            if do_shift_takeover: return this_person
     
     def initialize_data_collector(self) -> None:
         """Initialize data collector."""
         model_reporters={key : [lambda key: self.counts[key], [key]] for key in self.counts}
         metric_reporters={state+'_%' : [lambda state: self.metrics[state], [state]] for state in self.metrics}
-        
         agent_reporters={'atype':'atype', 'position':'geometry', 'state':'state'}
         self.datacollector = mesa.DataCollector({**model_reporters,**metric_reporters}, agent_reporters, tables=None)
         self.datacollector.collect(self)
 
     def reset_counts(self):
-        self.counts = { key : 0 for key in self.collected_fields}
+        self.counts = dict.fromkeys(self.collected_fields,0)
 
     def reset_metrics(self):
-        self.metrics = { key : 0 for key in self.metric_fields}
-        self.metrics.update({ 'not-'+key : 1 for key in self.metric_fields})
+        self.metrics = dict.fromkeys(self.metric_fields, 0)
+        self.metrics.update({'not-'+key : 1 for key in self.metric_fields})
 
-    def update_metrics(self):
+    def update_metrics(self, people_list):
+        ''''Update metrics with the current state of the agents in people_list'''
         for key in self.metric_fields:
-            true_key=0; prev_running_time=0; working_nurses=0
-            for nurse in self.nurses:
-                if nurse.life_span>0:
-                    true_key+=nurse.state==key
-                    prev_running_time+=nurse.life_span-1
-                    working_nurses+=1
-            if working_nurses>0:
-                self.metrics[key]=(self.metrics[key]*prev_running_time + true_key)/(prev_running_time+len(self.nurses))
+            true_key=0; prev_running_time=0; active_agents=0
+            for agent in people_list:
+                if agent.life_span>0:
+                    true_key+=agent.state==key
+                    prev_running_time+=agent.life_span-1
+                    active_agents+=1
+            if active_agents>0:
+                self.metrics[key]=(self.metrics[key]*prev_running_time + true_key)/(prev_running_time+len(people_list))
                 self.metrics['not-'+key]=1-self.metrics[key]
-    
+
     def step(self):
         """Run one step of the model."""
         self.reset_counts()
         self.schedule.step()
-        self.update_metrics()
+        self.update_metrics(self.nurses)
         self.space._recreate_rtree() # Recalculate spatial tree, because agents are moving
         self.datacollector.collect(self) # collect data
 
