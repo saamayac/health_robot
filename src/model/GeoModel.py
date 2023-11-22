@@ -13,8 +13,10 @@ import random
 
 class GeoModel(mesa.Model): 
 
-    def __init__(self, n_doctors=2, n_nurses=3, ocupation=10):
+    def __init__(self, n_doctors=2, n_nurses=3, ocupation=10, n_shifts=3):
+        """Create a new GeoModel."""
         self.running = True
+        self.number_shifts = n_shifts
         self.schedule = HospitalScheduler(self)
         self.current_id=0
 
@@ -33,19 +35,32 @@ class GeoModel(mesa.Model):
                              'do-medicate': 'medicating',
 
                              # patient actions
-                             'request-admission': 'waiting-admission', # starts 'in-admission' and ends in 'admitted'
-                             'request-evaluation': 'waiting-evaluation', # starts 'in-evaluation' and ends in 'evaluated'
-                             'request-medication': 'waiting-medication', # starts 'in-medication' and ends in 'medicated'
+                             'request-admission': 'waiting-admission', # starts 'in-admission' 
+                             'request-evaluation': 'waiting-evaluation', # starts 'in-evaluation' 
+                             'request-medication': 'waiting-medication', # starts 'in-medication'
                              }
+        
+        # action priority: 1 urgent (stop the rest of the tasks), 0 not urgent
+        # only tasks without waiting time can be urgent
+        self.action_priority = {'remove': 0,
+                                'do-informative-meeting': 0,
+                                'do-inventory': 0,
+                                'do-document': 0,
+                                'do-admit': 1,
+                                'do-evaluate': 1,
+                                'do-medicate': 1,
+                                'request-admission': 0,
+                                'request-evaluation': 0,
+                                'request-medication': 0,
+                                }
+        
 
         # counts for performance metrics
-        self.collected_fields = ["doctor", "nurse", "patient", "idle", "walking","removed",
-                                 'in-admission','admitted',
-                                 'in-evaluation','evaluated',
-                                 'in-medication','medicated'] + list(self.action_state.values())
+        self.collected_fields = ["empty","ocupied",
+                                 "doctor", "nurse", "patient", 
+                                 "resting","idle_nurse","idle_doctor", "walking",
+                                 'in-admission','in-evaluation','in-medication'] + list(self.action_state.values())
         self.reset_counts()
-        self.metric_fields = ['walking','documenting','admitting','evaluating','medicating','taking-inventory','in-meeting']
-        self.reset_metrics()
 
         # create hospital space
         self.space = Hospital()
@@ -68,22 +83,30 @@ class GeoModel(mesa.Model):
         # collect initialization data
         self.initialize_data_collector()
 
+        self.setup_df=pd.DataFrame({'n_doctors':n_doctors, 'n_nurses':n_nurses, 'max_ocupation':ocupation, 
+                                    'capacity': self.space.floor.patient_availability,
+                                    'n_shifts': n_shifts}, index=['setup'])
+
     def resample_variables(self):
         # lifetime related
-        self.patient_stay_length = random.triangular(2*60, 3*60)
-        self.time_between_patients=random.triangular(5, 10)
-        self.shift_length = 12*60
+        self.patient_stay_length = random.triangular(12*60, 24*60)
+        self.time_between_patients = random.triangular(2*60, 5*60)
+        self.shift_length = 7*60
 
         # shift related
-        self.walking_speed=15 # steps per time tick
-        self.shift_transfer_meeting_time = random.triangular(15, 20)
-        self.inventory_time = random.triangular(15, 20)
+        self.walking_speed = 15 # steps per time tick
+        self.shift_transfer_meeting_time = random.triangular(30, 40)
+        self.inventory_time = random.triangular(30, 40)
+        self.documentation_time = random.triangular(5, 10)
+        # do medication round every two hours
+        self.medicine_round_frequency = 120
+        self.next_medication_time = self.schedule.steps-self.schedule.steps%self.medicine_round_frequency+self.medicine_round_frequency
 
         # patient related
-        self.medicine_round_frequency = random.triangular(60, 120)
-        self.admission_time = random.triangular(5, 10)
-        self.evaluation_time = random.triangular(5, 10)
-        self.evaluation_frequency = random.triangular(60, 120)
+        self.medication_application_time = random.triangular(5, 10)
+        self.admission_time = random.triangular(20, 30)
+        self.evaluation_time = random.triangular(20, 30)
+        self.evaluation_frequency = random.triangular(4*60, 6*60)
         
 
     def init_poputation(self, n_doctors, n_nurses, n_patients):
@@ -96,7 +119,7 @@ class GeoModel(mesa.Model):
         self.add_PersonAgents(self.ac_doctors, n_doctors, self.space.nurse_station)
         self.add_PersonAgents(self.ac_nurses, n_nurses, self.space.nurse_station)
         for _ in range(n_patients): # add patients at different times
-            self.schedule.patient_arrivals.append(self.schedule.steps + int(self.time_between_patients))
+            self.schedule.patient_arrivals.append(self.schedule.steps + int(random.triangular(0, self.shift_length)))
             self.resample_variables()
 
     def add_PersonAgents(self, agentCreator, amount, this_spaces, do_shift_takeover=False): 
@@ -113,43 +136,21 @@ class GeoModel(mesa.Model):
     def initialize_data_collector(self) -> None:
         """Initialize data collector."""
         model_reporters={key : [lambda key: self.counts[key], [key]] for key in self.counts}
-        metric_reporters={state+'_%' : [lambda state: self.metrics[state], [state]] for state in self.metrics}
         agent_reporters={'atype':'atype', 'position':'geometry', 'state':'state'}
-        self.datacollector = mesa.DataCollector({**model_reporters,**metric_reporters}, agent_reporters, tables=None)
+        self.datacollector = mesa.DataCollector(model_reporters, agent_reporters, tables=None)
         self.datacollector.collect(self)
 
     def reset_counts(self):
         self.counts = dict.fromkeys(self.collected_fields,0)
 
-    def reset_metrics(self):
-        self.metrics = dict.fromkeys(self.metric_fields, 0)
-        self.metrics.update({'not-'+key : 1 for key in self.metric_fields})
-
-    def update_metrics(self, people_list):
-        ''''Update metrics with the current state of the agents in people_list'''
-        for key in self.metric_fields:
-            true_key=0; prev_running_time=0; active_agents=0
-            for agent in people_list:
-                if agent.life_span>0:
-                    true_key+=agent.state==key
-                    prev_running_time+=agent.life_span-1
-                    active_agents+=1
-            if active_agents>0:
-                self.metrics[key]=(self.metrics[key]*prev_running_time + true_key)/(prev_running_time+len(people_list))
-                self.metrics['not-'+key]=1-self.metrics[key]
-
     def step(self):
         """Run one step of the model."""
         self.reset_counts()
         self.schedule.step()
-        self.update_metrics(self.nurses)
         self.space._recreate_rtree() # Recalculate spatial tree, because agents are moving
         self.datacollector.collect(self) # collect data
 
         # Run until no one is working in the hospital
-        if self.schedule.steps>self.shift_length:
+        if self.schedule.steps>self.number_shifts*self.shift_length:
             self.running = False
-            # collect dataframes into csv files
-            self.datacollector.get_agent_vars_dataframe().to_csv(join('data','agents.csv'))
-            self.datacollector.get_model_vars_dataframe().to_csv(join('data','model.csv'))
-            print("running for ", self.schedule.steps, " steps")
+            

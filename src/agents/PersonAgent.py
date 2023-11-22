@@ -13,16 +13,23 @@ class PersonAgent(mg.GeoAgent):
         self.set_idle()
         self.interacting_with = None
         
-        self.life_span = 0
-        self.medication_frequency = self.model.medicine_round_frequency
+        self.own_medication_frequency = self.model.medicine_round_frequency
+        self.own_medication_application_time = self.model.medication_application_time
         self.initialize()
         self.count_agents()
     
     def __repr__(self):
         return "PersonAgent_"+str(self.unique_id)
 
+    def count_agents(self):
+        """Count agents in the model."""
+        self.model.counts[self.state] += 1
+        self.model.counts[self.atype] += 1
+
     def set_idle(self):
-        self.state='idle'
+        if self.atype=='patient': self.state='resting'
+        elif self.atype=='nurse': self.state='idle_nurse'
+        elif self.atype=='doctor': self.state='idle_doctor'
         self.path=[]
 
     def initialize(self):
@@ -34,8 +41,9 @@ class PersonAgent(mg.GeoAgent):
             self.scheduler.add_scheduled_task(action='request-admission')
             self.scheduler.add_scheduled_task(action='request-evaluation', 
                                               freq=self.model.evaluation_frequency)
-            self.scheduler.add_scheduled_task(action='request-medication', 
-                                              freq=self.medication_frequency)
+            self.scheduler.add_scheduled_task(action='request-medication',
+                                              execute_in=self.model.next_medication_time,
+                                              freq=self.own_medication_frequency)
         
         elif self.atype == 'nurse':
             self.model.nurses.append(self)
@@ -43,15 +51,13 @@ class PersonAgent(mg.GeoAgent):
             self.scheduler.add_scheduled_task(action='do-inventory',
                                           route=[self.model.space.medication_station], 
                                           duration=self.model.inventory_time)
+            self.scheduler.add_scheduled_task(action='do-document',
+                                              route=[self.model.space.nurse_station], 
+                                              duration=self.model.documentation_time)
         elif self.atype=='doctor':
             self.model.doctors.append(self)
             self.start_shift()
         else: raise NameError('AgentTypeNotDefined')
-    
-    def count_agents(self):
-        """Count agents in the model."""
-        self.model.counts[self.state] += 1
-        self.model.counts[self.atype] += 1
 
     def start_shift(self):
         self.scheduler.add_scheduled_task(action='remove',
@@ -66,53 +72,46 @@ class PersonAgent(mg.GeoAgent):
         self.scheduler.execute_schedule(self.model.schedule.steps)
         self.model.resample_variables()
         self.count_agents()
-        self.life_span += 1
 
     def prepare_task(self, **kwargs):
         '''either hold the current task while walking or hold the next task while executing current'''
         route = kwargs['route'] if 'route' in kwargs else []
         if not route or self.compare_placement(route[-1]):
             action=kwargs['action']
-            print('prepare to execute')
             self.state=self.model.action_state[action]
             self.scheduler.hold_next_action = kwargs['duration'] if 'duration' in kwargs else 1
 
             # trigger functions at the beginning of the task
             if action=='request-admission': 
-                self.request_admission()
-                self.nurse.scheduler.add_scheduled_task(action='do-admit',
-                                                        route=[self], 
+                self.register_patient()
+                self.nurse.scheduler.add_scheduled_task(action='do-admit',route=[self], 
                                                         duration=self.model.admission_time)
             elif action=='request-evaluation':
-                self.doctor.scheduler.add_scheduled_task(action='do-evaluate',
-                                                         route=[self], 
+                self.doctor.scheduler.add_scheduled_task(action='do-evaluate',route=[self], 
                                                          duration=self.model.evaluation_time)
                 self.doctor.scheduler.add_scheduled_task(action='do-document',
                                                          route=[self.model.space.nurse_station], 
-                                                         duration=self.model.evaluation_time)
+                                                         duration=self.model.documentation_time)
             elif action=='request-medication':
-                self.nurse.scheduler.add_scheduled_task(action='do-medicate',
-                                                        route=[self], 
-                                                        duration=self.medication_frequency)
+                self.nurse.scheduler.add_scheduled_task(action='do-medicate', route=[self.model.space.medication_station, self], 
+                                                        duration=self.own_medication_application_time)
                 self.nurse.scheduler.add_scheduled_task(action='do-document',
                                                          route=[self.model.space.nurse_station], 
-                                                         duration=self.model.evaluation_time)
+                                                         duration=self.model.documentation_time)
             elif action in ['do-admit','do-evaluate', 'do-medicate']: 
                 self.do_interactions(with_=route[-1], mode="initiate")
         
         else:
-            print('prepare to walk')
             self.link_paths(route)
             self.state='walking'
             self.scheduler.hold_current_action = True # hold current task while walking
 
-    def request_admission(self):
+    def register_patient(self):
         # assign to doctor & nurse with least patients
         doctor=sorted(self.model.doctors, key=lambda doc: len(doc.patients))[0]
         nurse=sorted(self.model.nurses, key=lambda nurse: len(nurse.patients))[0]
         nurse.patients.append(self); doctor.patients.append(self)
         self.doctor=doctor; self.nurse=nurse
-        
         
     def compare_placement(self, other_agent, radious=0.2) -> bool:
         """Return True if the agent is within radious of the other_agent"""
@@ -128,7 +127,6 @@ class PersonAgent(mg.GeoAgent):
     
     def do_interactions(self, with_=None, mode=None):
         if mode=="initiate" and isinstance(with_, PersonAgent):
-            print("initiate interaction")
             self.interacting_with=with_
             with_.interacting_with=self
             if self.state=='admitting': with_.state='in-admission'
@@ -136,19 +134,14 @@ class PersonAgent(mg.GeoAgent):
             if self.state=='medicating': with_.state='in-medication'
         
         elif mode=="terminate" and isinstance(self.interacting_with, PersonAgent):
-            print("terminate interaction")
-            if self.state=='admitting':
-                self.interacting_with.state='admitted'
-            if self.state=='evaluating':
-                self.interacting_with.state='evaluated'
-            if self.state=='medicating':
-                self.interacting_with.state='medicated'
+            if self.state in ['admitting','evaluating','medicating']: 
+                self.interacting_with.set_idle()
+                self.interacting_with.scheduler.hold_next_action = 0
             self.interacting_with.interacting_with=None
             self.interacting_with=None
 
     def execute_task(self):
         if self.state=='walking':
-            print('walking')
             for _ in range(self.model.walking_speed):
                 self.geometry = Point(self.path.pop(0))
                 if len(self.path)==0: 
@@ -156,38 +149,29 @@ class PersonAgent(mg.GeoAgent):
                     break
 
         elif 'waiting' in self.state or self.state in ['in-admission', 'in-evaluation', 'in-medication']:
-            print('waiting or receiving care')
             self.scheduler.hold_next_action = 1
-
-        elif self.state=='leaving':
-            self.scheduler.do_finish_task=True
+        
+        elif self.state=='leaving': 
+            self.remove()
 
         else:
-            print('executing task')
             self.scheduler.hold_next_action -= 1
             if self.scheduler.hold_next_action <= 0: self.scheduler.do_finish_task=True
         
     def terminate_task(self):
         if self.state=='walking':
-            print("arrived at destination")
             self.scheduler.hold_current_action=False
             self.set_idle()
-        
-        elif self.state=='leaving':
-            print('removing')
-            self.remove()
 
         else:
-            print('finished task')
             self.do_interactions(mode="terminate")
             self.set_idle()
         
     def remove(self):
         """Remove agent from model and space."""
         # if patient, remove and trigger next patient's arrival
-        if self.atype=='patient': 
-            self.doctor.patients.remove(self)
-            self.nurse.patients.remove(self)
+        if self.atype=='patient':
+            self.doctor.patients.remove(self); self.nurse.patients.remove(self)
             self.model.schedule.patient_arrivals.append(self.model.schedule.steps + int(self.model.time_between_patients))
         # if other, remove and trigger replacement on next shift
         elif self.atype=='nurse': 

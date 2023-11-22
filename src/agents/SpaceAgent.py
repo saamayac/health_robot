@@ -8,9 +8,12 @@ class SpaceAgent(mg.GeoAgent):
         # patient placement attributes
         self.patient_availability=0
         self.patient_ocupation=0
-        self.state='empty' if self.patient_ocupation==0 else 'ocupied'
         self.area=None
         self.inner_areas=set()
+    
+    @property
+    def state(self):
+        return 'empty' if self.patient_ocupation==0 else 'ocupied'
         
     def step(self):
         """Advance agent one step."""
@@ -18,7 +21,7 @@ class SpaceAgent(mg.GeoAgent):
         patients_here=self.model.space.get_relation_to_Agent(self, 'contains', 'patient', to_centroid=False)
         self.patient_ocupation = len(list(patients_here))
         assert self.patient_ocupation <= self.patient_availability, 'TooManyPatientsHere'
-        self.state='empty' if self.patient_ocupation==0 else 'ocupied'
+        self.model.counts[self.state] += 1
 
     def __repr__(self):
         return "SpaceAgent_"+str(self.unique_id)
