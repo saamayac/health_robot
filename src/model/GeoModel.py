@@ -3,7 +3,7 @@ import mesa_geo as mg
 
 from agents.PersonAgent import PersonAgent
 from agents.SpaceAgent import SpaceAgent
-from agents.HospitalAgent import Hospital
+from agents.HospitalAgent import HospitalAgent
 from model.Schedulers import HospitalScheduler
 
 from os.path import join
@@ -12,7 +12,7 @@ import pandas as pd
 import random
 
 class GeoModel(mesa.Model): 
-
+ 
     def __init__(self, n_doctors=2, n_nurses=3, ocupation=10, n_shifts=3):
         """Create a new GeoModel."""
         self.running = True
@@ -22,9 +22,7 @@ class GeoModel(mesa.Model):
 
         # Scheduled actions time
         self.resample_variables()
-        self.action_state = {'remove': 'leaving',
-                             
-                             # shift actions
+        self.action_state = {# shift actions
                              'do-informative-meeting': 'in-meeting',
                              'do-inventory': 'taking-inventory',
                              'do-document': 'documenting',
@@ -35,16 +33,16 @@ class GeoModel(mesa.Model):
                              'do-medicate': 'medicating',
 
                              # patient actions
-                             'request-admission': 'waiting-admission', # starts 'in-admission' 
-                             'request-evaluation': 'waiting-evaluation', # starts 'in-evaluation' 
-                             'request-medication': 'waiting-medication', # starts 'in-medication'
+                             'request-admission': 'waiting-admission', # interaction with nurse starts 'in-admission' 
+                             'request-evaluation': 'waiting-evaluation', # interaction with doctor starts 'in-evaluation' 
+                             'request-medication': 'waiting-medication', # interaction with nurse starts 'in-medication'
                              }
         
-        # action priority: 1 urgent (stop the rest of the tasks), 0 not urgent
+        # action priority: 1 urgent (stop the rest of the tasks until it is executed), 0 not urgent
         # only tasks without waiting time can be urgent
         self.action_priority = {'remove': 0,
-                                'do-informative-meeting': 0,
-                                'do-inventory': 0,
+                                'do-informative-meeting': 2,
+                                'do-inventory': 2,
                                 'do-document': 0,
                                 'do-admit': 1,
                                 'do-evaluate': 1,
@@ -54,7 +52,6 @@ class GeoModel(mesa.Model):
                                 'request-medication': 0,
                                 }
         
-
         # counts for performance metrics
         self.collected_fields = ["empty","ocupied",
                                  "doctor", "nurse", "patient", 
@@ -63,7 +60,7 @@ class GeoModel(mesa.Model):
         self.reset_counts()
 
         # create hospital space
-        self.space = Hospital()
+        self.space = HospitalAgent()
         self.doctors=[]; self.nurses=[]
 
         # SpaceAgents: read from files and add to model
@@ -80,18 +77,21 @@ class GeoModel(mesa.Model):
         # Add the SpaceAgents to schedule AFTER person agents, to allow them to update their ocupation by using BaseScheduler   
         for agent in space_agents: self.schedule.add(agent)
 
-        # collect initialization data
-        self.initialize_data_collector()
+        # initialize data collector
+        model_reporters={key : [lambda key: self.counts[key], [key]] for key in self.counts}
+        agent_reporters={'atype':'atype', 'position':'geometry', 'state':'state'}
+        self.datacollector = mesa.DataCollector(model_reporters, agent_reporters, tables=None)
 
+        # collect initialization of the model
         self.setup_df=pd.DataFrame({'n_doctors':n_doctors, 'n_nurses':n_nurses, 'max_ocupation':ocupation, 
                                     'capacity': self.space.floor.patient_availability,
                                     'n_shifts': n_shifts}, index=['setup'])
 
     def resample_variables(self):
         # lifetime related
-        self.patient_stay_length = random.triangular(12*60, 24*60)
-        self.time_between_patients = random.triangular(2*60, 5*60)
-        self.shift_length = 7*60
+        self.patient_stay_length = random.triangular(12*60, 24*60) #tp
+        self.time_between_patients = random.triangular(2*60, 5*60) #tb
+        self.shift_length = 7*60 #shift length
 
         # shift related
         self.walking_speed = 15 # steps per time tick
@@ -132,13 +132,6 @@ class GeoModel(mesa.Model):
             self.space.add_agents(this_person)
             # return person if shift takeover is needed
             if do_shift_takeover: return this_person
-    
-    def initialize_data_collector(self) -> None:
-        """Initialize data collector."""
-        model_reporters={key : [lambda key: self.counts[key], [key]] for key in self.counts}
-        agent_reporters={'atype':'atype', 'position':'geometry', 'state':'state'}
-        self.datacollector = mesa.DataCollector(model_reporters, agent_reporters, tables=None)
-        self.datacollector.collect(self)
 
     def reset_counts(self):
         self.counts = dict.fromkeys(self.collected_fields,0)
@@ -147,10 +140,12 @@ class GeoModel(mesa.Model):
         """Run one step of the model."""
         self.reset_counts()
         self.schedule.step()
-        self.space._recreate_rtree() # Recalculate spatial tree, because agents are moving
-        self.datacollector.collect(self) # collect data
+        self.space._recreate_rtree() # recalculate spatial tree, because agents are moving
 
-        # Run until no one is working in the hospital
-        if self.schedule.steps>self.number_shifts*self.shift_length:
+        if self.schedule.steps>0: # start collecting data after warm-up time
+            self.datacollector.collect(self)
+
+        # stop criteria
+        if self.schedule.steps>=self.number_shifts*self.shift_length:
             self.running = False
             

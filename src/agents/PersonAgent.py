@@ -15,6 +15,7 @@ class PersonAgent(mg.GeoAgent):
         
         self.own_medication_frequency = self.model.medicine_round_frequency
         self.own_medication_application_time = self.model.medication_application_time
+        self.life_time=0
         self.initialize()
         self.count_agents()
     
@@ -36,8 +37,7 @@ class PersonAgent(mg.GeoAgent):
         """Set time to stop being active and schedule initial actions."""
         if self.atype == 'patient':
             self.nurse=None; self.doctor=None
-            self.scheduler.add_scheduled_task(action='remove', 
-                                              execute_in=self.model.patient_stay_length)
+            self.life_time=self.model.patient_stay_length
             self.scheduler.add_scheduled_task(action='request-admission')
             self.scheduler.add_scheduled_task(action='request-evaluation', 
                                               freq=self.model.evaluation_frequency)
@@ -60,8 +60,7 @@ class PersonAgent(mg.GeoAgent):
         else: raise NameError('AgentTypeNotDefined')
 
     def start_shift(self):
-        self.scheduler.add_scheduled_task(action='remove',
-                                          execute_in=self.model.shift_length)
+        self.life_time=self.model.shift_length
         self.patients=[]
         self.scheduler.add_scheduled_task(action='do-informative-meeting',
                                           route=[self.model.space.nurse_station], 
@@ -72,6 +71,9 @@ class PersonAgent(mg.GeoAgent):
         self.scheduler.execute_schedule(self.model.schedule.steps)
         self.model.resample_variables()
         self.count_agents()
+        # decrease life time
+        self.life_time -= 1
+        if self.life_time == 0: self.remove()
 
     def prepare_task(self, **kwargs):
         '''either hold the current task while walking or hold the next task while executing current'''
@@ -113,9 +115,9 @@ class PersonAgent(mg.GeoAgent):
         nurse.patients.append(self); doctor.patients.append(self)
         self.doctor=doctor; self.nurse=nurse
         
-    def compare_placement(self, other_agent, radious=0.2) -> bool:
+    def compare_placement(self, other_agent) -> bool:
         """Return True if the agent is within radious of the other_agent"""
-        return self.geometry.centroid.within(other_agent.geometry.centroid.buffer(radious))
+        return self.geometry.centroid.within(other_agent.geometry.centroid.buffer(self.model.space.comparison_buffer))
     
     def link_paths(self, agents_to_visit):
         """Link paths to multiple agents"""
@@ -150,9 +152,6 @@ class PersonAgent(mg.GeoAgent):
 
         elif 'waiting' in self.state or self.state in ['in-admission', 'in-evaluation', 'in-medication']:
             self.scheduler.hold_next_action = 1
-        
-        elif self.state=='leaving': 
-            self.remove()
 
         else:
             self.scheduler.hold_next_action -= 1

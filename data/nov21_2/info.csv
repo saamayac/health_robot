@@ -1,2 +1,2 @@
 ,n_doctors,n_nurses,max_ocupation,capacity,n_shifts,steps (minutes),computation_time
-setup,2,2,70,34,3,1261,586.97
+setup,2,2,70,34,3,1261,404.06

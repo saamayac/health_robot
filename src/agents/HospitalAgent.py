@@ -4,8 +4,7 @@ from typing import Set
 from agents.SpaceAgent import SpaceAgent
 from data_processing.FloorNavigation import DStarLite
 
-class Hospital(mg.GeoSpace): # inherits from mesa_geo.GeoSpace
-    # Space agents
+class HospitalAgent(mg.GeoSpace):
     rooms: Set[SpaceAgent]
     beds: Set[SpaceAgent]
     nurse_station: SpaceAgent
@@ -14,7 +13,6 @@ class Hospital(mg.GeoSpace): # inherits from mesa_geo.GeoSpace
 
     def __init__(self) -> None:
         super().__init__(warn_crs_conversion=False)
-        # initialize sets of Agents
         self.rooms = set()
         self.beds = set()
         self.nurse_station = None
@@ -22,6 +20,22 @@ class Hospital(mg.GeoSpace): # inherits from mesa_geo.GeoSpace
         self.floor = None
         self.dstarlite = None
         self.cache_paths = {}
+        self.comparison_buffer=0.2
+
+    def add_SpaceAgents(self, agents) -> None:
+        super().add_agents(agents)
+        for agent in agents:
+            if agent.atype == 'room': self.rooms.add(agent)
+            if agent.atype == 'bed': 
+                self.beds.add(agent)
+                agent.patient_availability = 1 # fix bed's patient capacity to 1
+            elif agent.atype == 'nurse_station': self.nurse_station = agent
+            elif agent.atype == 'medication_station': self.medication_station = agent
+            elif agent.atype == 'floor':
+                self.floor = agent
+                self.init_floor_navigation()
+        self.set_containing_relations(self.beds,'room')
+        self.set_containing_relations(self.rooms,'floor')
 
     def init_floor_navigation(self):
         # prepare path creation object and load previous paths
@@ -39,7 +53,7 @@ class Hospital(mg.GeoSpace): # inherits from mesa_geo.GeoSpace
 
         # try to find path in cache
         for (path_start, path_end), path in self.cache_paths.items():
-            if start.within(path_start.buffer(0.2)) and end.within(path_end.buffer(0.2)): return path.tolist()
+            if start.within(path_start.buffer(self.comparison_buffer)) and end.within(path_end.buffer(self.comparison_buffer)): return path.tolist()
 
         # if not on cache: calculate shortest path
         found_path, stepByStep_Path = self.dstarlite.main(start, end)
@@ -51,21 +65,6 @@ class Hospital(mg.GeoSpace): # inherits from mesa_geo.GeoSpace
         with open("data/paths/cache_paths.pkl", "wb") as cache_file: pickle.dump(self.cache_paths,cache_file)
 
         return stepByStep_Path.tolist()
-
-    def add_SpaceAgents(self, agents) -> None:
-        super().add_agents(agents)
-        for agent in agents:
-            if agent.atype == 'room': self.rooms.add(agent)
-            if agent.atype == 'bed': 
-                self.beds.add(agent)
-                agent.patient_availability = 1 # fix bed's patient capacity to 1
-            elif agent.atype == 'nurse_station': self.nurse_station = agent
-            elif agent.atype == 'medication_station': self.medication_station = agent
-            elif agent.atype == 'floor':
-                self.floor = agent
-                self.init_floor_navigation()
-        self.set_containing_relations(self.beds,'room')
-        self.set_containing_relations(self.rooms,'floor')
 
     def set_containing_relations(self, inner, outer_type) -> None:
         """Relate rooms to beds."""
