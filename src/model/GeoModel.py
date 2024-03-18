@@ -19,6 +19,7 @@ class GeoModel(mesa.Model):
         self.number_shifts = n_shifts
         self.schedule = HospitalScheduler(self)
         self.current_id=0
+        self.hit_list = []
 
         # Scheduled actions time
         self.resample_variables()
@@ -140,6 +141,10 @@ class GeoModel(mesa.Model):
         """Run one step of the model."""
         self.reset_counts()
         self.schedule.step()
+        while len(self.hit_list) > 0:
+            agent = self.hit_list.pop()
+            self.schedule.remove(agent)
+            self.space.remove_agent(agent)
         self.space._recreate_rtree() # recalculate spatial tree, because agents are moving
 
         if self.schedule.steps>0: # start collecting data after warm-up time

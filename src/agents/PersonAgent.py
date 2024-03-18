@@ -179,8 +179,7 @@ class PersonAgent(mg.GeoAgent):
         elif self.atype=='doctor':
             self.transfer_workload(self.model.ac_doctors)
             self.model.doctors.remove(self)
-        self.model.schedule.remove(self)
-        self.model.space.remove_agent(self)
+        self.model.hit_list.append(self)
 
     def transfer_workload(self, agentCreator):
         new_worker = self.model.add_PersonAgents(agentCreator, 1, self.model.space.nurse_station, do_shift_takeover=True)
